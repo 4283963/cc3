@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import { Modal, Form, InputNumber, Button, Space, message } from 'antd'
 import { SettingOutlined } from '@ant-design/icons'
-import type { WeightConfig, WeightConfigUpdate } from '../../types'
-import { weightsApi } from '../../api'
+import type { WeightConfig, WeightConfigUpdate } from '../types'
+import { weightsApi } from '../api'
 
 interface WeightConfigModalProps {
   visible: boolean
