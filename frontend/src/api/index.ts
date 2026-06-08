@@ -6,9 +6,16 @@ const request = axios.create({
   timeout: 10000,
 })
 
+export interface GetRankingsParams {
+  time_range?: string
+  days?: number
+  start_date?: string
+  end_date?: string
+}
+
 export const efficiencyApi = {
-  getRankings: async (): Promise<EfficiencyRankingResponse> => {
-    const response = await request.get('/efficiency/rankings')
+  getRankings: async (params?: GetRankingsParams): Promise<EfficiencyRankingResponse> => {
+    const response = await request.get('/efficiency/rankings', { params })
     return response.data
   },
 

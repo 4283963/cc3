@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import {
   Card,
   Row,
@@ -13,6 +13,9 @@ import {
   message,
   Spin,
   Tooltip,
+  Select,
+  Progress,
+  Empty,
 } from 'antd'
 import {
   TrophyOutlined,
@@ -23,6 +26,7 @@ import {
   ReloadOutlined,
   RiseOutlined,
   FallOutlined,
+  BarChartOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
@@ -57,31 +61,49 @@ const EfficiencyDashboard: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<EfficiencyRankingResponse | null>(null)
   const [weightModalVisible, setWeightModalVisible] = useState(false)
+  const [timeRange, setTimeRange] = useState<string>('30d')
 
-  const fetchData = async () => {
+  const timeRangeOptions = [
+    { value: '7d', label: '近 7 天' },
+    { value: '30d', label: '近 30 天' },
+    { value: '90d', label: '近 90 天' },
+    { value: '6m', label: '近 6 个月' },
+    { value: '1y', label: '近 1 年' },
+  ]
+
+  const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      const result = await efficiencyApi.getRankings()
+      const result = await efficiencyApi.getRankings({ time_range: timeRange })
       setData(result)
-    } catch (error) {
-      message.error('获取排行数据失败')
+    } catch (error: any) {
+      const errMsg = error?.response?.data?.detail || error?.message || '获取排行数据失败'
+      message.error(errMsg)
       console.error(error)
+      setData(null)
     } finally {
       setLoading(false)
     }
-  }
+  }, [timeRange])
 
   useEffect(() => {
     fetchData()
-  }, [])
+  }, [fetchData])
 
   const maxScore = useMemo(() => {
     if (!data?.rankings?.length) return 0
     return Math.max(...data.rankings.map((item) => item.total_score))
   }, [data])
 
+  const rankingsList = useMemo(() => {
+    if (!data || !Array.isArray(data.rankings)) {
+      return []
+    }
+    return data.rankings
+  }, [data])
+
   const stats = useMemo(() => {
-    if (!data?.rankings?.length) {
+    if (!rankingsList.length) {
       return {
         totalMembers: 0,
         totalLines: 0,
@@ -89,16 +111,15 @@ const EfficiencyDashboard: React.FC = () => {
         avgBugRate: 0,
       }
     }
-    const rankings = data.rankings
     return {
-      totalMembers: rankings.length,
-      totalLines: rankings.reduce((sum, item) => sum + item.total_lines, 0),
-      totalBugsFixed: rankings.reduce((sum, item) => sum + item.bugs_fixed, 0),
+      totalMembers: rankingsList.length,
+      totalLines: rankingsList.reduce((sum, item) => sum + item.total_lines, 0),
+      totalBugsFixed: rankingsList.reduce((sum, item) => sum + item.bugs_fixed, 0),
       avgBugRate: (
-        rankings.reduce((sum, item) => sum + item.bug_rate, 0) / rankings.length
+        rankingsList.reduce((sum, item) => sum + item.bug_rate, 0) / rankingsList.length
       ).toFixed(2),
     }
-  }, [data])
+  }, [rankingsList])
 
   const columns: ColumnsType<UserEfficiency> = [
     {
@@ -233,6 +254,15 @@ const EfficiencyDashboard: React.FC = () => {
     },
   ]
 
+  const handleTimeRangeChange = (value: string) => {
+    setTimeRange(value)
+  }
+
+  const getTimeRangeLabel = (value: string) => {
+    const option = timeRangeOptions.find((o) => o.value === value)
+    return option?.label || value
+  }
+
   return (
     <div>
       <div
@@ -241,15 +271,23 @@ const EfficiencyDashboard: React.FC = () => {
           justifyContent: 'space-between',
           alignItems: 'center',
           marginBottom: '24px',
+          flexWrap: 'wrap',
+          gap: '16px',
         }}
       >
         <Title level={3} style={{ margin: 0 }}>
           <TrophyOutlined style={{ color: '#faad14' }} /> 团队卷王看板
         </Title>
-        <Space>
+        <Space wrap>
           <span style={{ color: '#8c8c8c', fontSize: '13px' }}>
             数据更新于: {data ? dayjs(data.updated_at).format('YYYY-MM-DD HH:mm:ss') : '--'}
           </span>
+          <Select
+            value={timeRange}
+            onChange={handleTimeRangeChange}
+            style={{ width: 140 }}
+            options={timeRangeOptions}
+          />
           <Button icon={<ReloadOutlined />} onClick={fetchData} loading={loading}>
             刷新
           </Button>
@@ -313,20 +351,90 @@ const EfficiencyDashboard: React.FC = () => {
       <Card
         title={
           <Space>
+            <BarChartOutlined style={{ color: '#1890ff' }} />
+            <span>团队绩效得分排行</span>
+          </Space>
+        }
+        extra={<Tag color="blue">{getTimeRangeLabel(timeRange)}</Tag>}
+        style={{ marginBottom: '24px' }}
+      >
+        <Spin spinning={loading}>
+          {rankingsList.length > 0 ? (
+            <div style={{ padding: '12px 0' }}>
+              {rankingsList.slice(0, 10).map((item) => (
+                <div
+                  key={item.user_id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    marginBottom: '16px',
+                  }}
+                >
+                  <div style={{ width: '40px', textAlign: 'center' }}>
+                    {getRankIcon(item.rank)}
+                  </div>
+                  <Avatar
+                    size={32}
+                    src={item.avatar_url}
+                    style={{ marginRight: '12px', backgroundColor: '#1890ff' }}
+                  >
+                    {item.display_name?.charAt(0)}
+                  </Avatar>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        marginBottom: '4px',
+                      }}
+                    >
+                      <span style={{ fontWeight: 500 }}>{item.display_name}</span>
+                      <span
+                        style={{
+                          color: getScoreColor(item.total_score, maxScore),
+                          fontWeight: 'bold',
+                        }}
+                      >
+                        {item.total_score.toFixed(1)} 分
+                      </span>
+                    </div>
+                    <Progress
+                      percent={maxScore > 0 ? (item.total_score / maxScore) * 100 : 0}
+                      showInfo={false}
+                      strokeColor={getScoreColor(item.total_score, maxScore)}
+                      size="small"
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <Empty description="暂无数据，请调整时间范围或等待数据同步" />
+          )}
+        </Spin>
+      </Card>
+
+      <Card
+        title={
+          <Space>
             <TrophyOutlined style={{ color: '#faad14' }} />
             <span>团队绩效排名</span>
           </Space>
         }
-        extra={<Tag color="blue">近30天数据</Tag>}
+        extra={<Tag color="blue">{getTimeRangeLabel(timeRange)}</Tag>}
       >
         <Spin spinning={loading}>
-          <Table
-            columns={columns}
-            dataSource={data?.rankings || []}
-            rowKey="user_id"
-            pagination={false}
-            size="middle"
-          />
+          {rankingsList.length > 0 ? (
+            <Table
+              columns={columns}
+              dataSource={rankingsList}
+              rowKey="user_id"
+              pagination={false}
+              size="middle"
+            />
+          ) : (
+            <Empty description="暂无排名数据" />
+          )}
         </Spin>
       </Card>
 
