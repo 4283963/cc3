@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import engine, Base
-from .api import efficiency, weights
+from .api import efficiency, weights, alerts
 from .webhooks import gitlab, jira, sonarqube
 
 Base.metadata.create_all(bind=engine)
@@ -23,6 +23,7 @@ app.add_middleware(
 
 app.include_router(efficiency.router, prefix="/api/efficiency", tags=["效能统计"])
 app.include_router(weights.router, prefix="/api/weights", tags=["权重配置"])
+app.include_router(alerts.router, prefix="/api/alerts", tags=["高危预警"])
 
 app.include_router(gitlab.router, prefix="/api/webhooks", tags=["Webhooks"])
 app.include_router(jira.router, prefix="/api/webhooks", tags=["Webhooks"])

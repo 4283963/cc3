@@ -31,6 +31,8 @@ class WeightConfigBase(BaseModel):
     sonar_bug_penalty: float = 3.0
     code_smell_penalty: float = 1.0
     vulnerability_penalty: float = 5.0
+    idle_days_penalty: float = 10.0
+    status_flip_threshold: int = 5
 
 
 class WeightConfigUpdate(BaseModel):
@@ -40,6 +42,8 @@ class WeightConfigUpdate(BaseModel):
     sonar_bug_penalty: Optional[float] = None
     code_smell_penalty: Optional[float] = None
     vulnerability_penalty: Optional[float] = None
+    idle_days_penalty: Optional[float] = None
+    status_flip_threshold: Optional[int] = None
 
 
 class WeightConfigResponse(WeightConfigBase):
@@ -64,6 +68,7 @@ class UserEfficiency(BaseModel):
     sonar_bugs: int = 0
     code_smells: int = 0
     vulnerabilities: int = 0
+    alert_penalty: float = 0.0
     total_score: float = 0.0
     bug_rate: float = 0.0
 
@@ -93,3 +98,30 @@ class SonarQubeWebhookPayload(BaseModel):
     project: dict
     qualityGate: Optional[dict] = None
     issues: Optional[List[dict]] = None
+
+
+class HighRiskAlertBase(BaseModel):
+    user_id: int
+    alert_type: str
+    severity: str = "high"
+    title: str
+    description: Optional[str] = None
+    issue_keys: Optional[str] = None
+    penalty_points: float = 0.0
+
+
+class HighRiskAlertResponse(HighRiskAlertBase):
+    id: int
+    detected_at: datetime
+    resolved: bool = False
+    resolved_at: Optional[datetime] = None
+    user: Optional[UserResponse] = None
+
+    class Config:
+        from_attributes = True
+
+
+class HighRiskAlertListResponse(BaseModel):
+    alerts: List[HighRiskAlertResponse]
+    total: int
+    unresolved_count: int

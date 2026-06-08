@@ -29,6 +29,8 @@ const WeightConfigModal: React.FC<WeightConfigModalProps> = ({
         sonar_bug_penalty: currentWeights.sonar_bug_penalty,
         code_smell_penalty: currentWeights.code_smell_penalty,
         vulnerability_penalty: currentWeights.vulnerability_penalty,
+        idle_days_penalty: currentWeights.idle_days_penalty,
+        status_flip_threshold: currentWeights.status_flip_threshold,
       })
     }
   }, [visible, currentWeights, form])
@@ -45,6 +47,8 @@ const WeightConfigModal: React.FC<WeightConfigModalProps> = ({
         sonar_bug_penalty: values.sonar_bug_penalty,
         code_smell_penalty: values.code_smell_penalty,
         vulnerability_penalty: values.vulnerability_penalty,
+        idle_days_penalty: values.idle_days_penalty,
+        status_flip_threshold: values.status_flip_threshold,
       }
 
       await weightsApi.updateWeights(updateData)
@@ -139,6 +143,22 @@ const WeightConfigModal: React.FC<WeightConfigModalProps> = ({
           rules={[{ required: true, message: '请输入权重' }]}
         >
           <InputNumber min={0} step={0.5} precision={1} style={{ width: '100%' }} />
+        </Form.Item>
+        <Form.Item
+          {...formItemLayout}
+          label="摸鱼行为扣分"
+          name="idle_days_penalty"
+          rules={[{ required: true, message: '请输入扣分数值' }]}
+        >
+          <InputNumber min={0} step={1} precision={0} style={{ width: '100%' }} />
+        </Form.Item>
+        <Form.Item
+          {...formItemLayout}
+          label="状态切换阈值(次)"
+          name="status_flip_threshold"
+          rules={[{ required: true, message: '请输入阈值' }]}
+        >
+          <InputNumber min={1} step={1} precision={0} style={{ width: '100%' }} />
         </Form.Item>
       </Form>
     </Modal>

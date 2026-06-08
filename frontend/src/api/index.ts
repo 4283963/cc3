@@ -1,5 +1,10 @@
 import axios from 'axios'
-import type { EfficiencyRankingResponse, WeightConfig, WeightConfigUpdate } from '../types'
+import type {
+  EfficiencyRankingResponse,
+  WeightConfig,
+  WeightConfigUpdate,
+  HighRiskAlertListResponse,
+} from '../types'
 
 const request = axios.create({
   baseURL: '/api',
@@ -47,6 +52,29 @@ export const weightsApi = {
 export const healthApi = {
   check: async () => {
     const response = await request.get('/health')
+    return response.data
+  },
+}
+
+export interface GetAlertsParams {
+  resolved?: boolean
+  limit?: number
+  offset?: number
+}
+
+export const alertsApi = {
+  getAlerts: async (params?: GetAlertsParams): Promise<HighRiskAlertListResponse> => {
+    const response = await request.get('/alerts', { params })
+    return response.data
+  },
+
+  scanAlerts: async () => {
+    const response = await request.post('/alerts/scan')
+    return response.data
+  },
+
+  resolveAlert: async (alertId: number) => {
+    const response = await request.post(`/alerts/${alertId}/resolve`)
     return response.data
   },
 }

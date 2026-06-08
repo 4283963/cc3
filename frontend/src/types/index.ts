@@ -16,6 +16,8 @@ export interface WeightConfig {
   sonar_bug_penalty: number
   code_smell_penalty: number
   vulnerability_penalty: number
+  idle_days_penalty: number
+  status_flip_threshold: number
   updated_at: string
   updated_by?: string
 }
@@ -33,6 +35,7 @@ export interface UserEfficiency {
   sonar_bugs: number
   code_smells: number
   vulnerabilities: number
+  alert_penalty: number
   total_score: number
   bug_rate: number
 }
@@ -50,4 +53,27 @@ export interface WeightConfigUpdate {
   sonar_bug_penalty?: number
   code_smell_penalty?: number
   vulnerability_penalty?: number
+  idle_days_penalty?: number
+  status_flip_threshold?: number
+}
+
+export interface HighRiskAlert {
+  id: number
+  user_id: number
+  alert_type: string
+  severity: string
+  title: string
+  description?: string
+  issue_keys?: string
+  penalty_points: number
+  detected_at: string
+  resolved: boolean
+  resolved_at?: string
+  user?: User
+}
+
+export interface HighRiskAlertListResponse {
+  alerts: HighRiskAlert[]
+  total: number
+  unresolved_count: number
 }

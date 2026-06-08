@@ -18,6 +18,8 @@ class User(Base):
     commits = relationship("CodeCommit", back_populates="author")
     jira_issues = relationship("JiraIssue", back_populates="assignee")
     sonar_issues = relationship("SonarIssue", back_populates="assignee")
+    status_changes = relationship("JiraStatusChange", back_populates="assignee")
+    high_risk_alerts = relationship("HighRiskAlert", back_populates="user")
 
 
 class CodeCommit(Base):
@@ -87,5 +89,39 @@ class WeightConfig(Base):
     sonar_bug_penalty = Column(Float, default=3.0)
     code_smell_penalty = Column(Float, default=1.0)
     vulnerability_penalty = Column(Float, default=5.0)
+    idle_days_penalty = Column(Float, default=10.0)
+    status_flip_threshold = Column(Integer, default=5)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     updated_by = Column(String(100))
+
+
+class JiraStatusChange(Base):
+    __tablename__ = "jira_status_changes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    issue_key = Column(String(50), index=True)
+    old_status = Column(String(50))
+    new_status = Column(String(50))
+    changed_at = Column(DateTime, default=datetime.utcnow, index=True)
+    assignee_id = Column(Integer, ForeignKey("users.id"))
+    change_type = Column(String(50))
+
+    assignee = relationship("User", back_populates="status_changes")
+
+
+class HighRiskAlert(Base):
+    __tablename__ = "high_risk_alerts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    alert_type = Column(String(50))
+    severity = Column(String(20), default="high")
+    title = Column(String(200))
+    description = Column(Text)
+    issue_keys = Column(Text)
+    penalty_points = Column(Float, default=0)
+    detected_at = Column(DateTime, default=datetime.utcnow, index=True)
+    resolved = Column(Boolean, default=False)
+    resolved_at = Column(DateTime, nullable=True)
+
+    user = relationship("User")

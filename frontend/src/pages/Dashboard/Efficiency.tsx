@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import {
   Card,
   Row,
@@ -16,6 +16,7 @@ import {
   Select,
   Progress,
   Empty,
+  Badge,
 } from 'antd'
 import {
   TrophyOutlined,
@@ -27,12 +28,18 @@ import {
   RiseOutlined,
   FallOutlined,
   BarChartOutlined,
+  BellOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import WeightConfigModal from '../../components/WeightConfigModal'
-import { efficiencyApi } from '../../api'
-import type { UserEfficiency, EfficiencyRankingResponse } from '../../types'
+import HighRiskAlertModal from '../../components/HighRiskAlertModal'
+import { efficiencyApi, alertsApi } from '../../api'
+import type {
+  UserEfficiency,
+  EfficiencyRankingResponse,
+  HighRiskAlert,
+} from '../../types'
 
 const { Title } = Typography
 
@@ -62,6 +69,9 @@ const EfficiencyDashboard: React.FC = () => {
   const [data, setData] = useState<EfficiencyRankingResponse | null>(null)
   const [weightModalVisible, setWeightModalVisible] = useState(false)
   const [timeRange, setTimeRange] = useState<string>('30d')
+  const [alerts, setAlerts] = useState<HighRiskAlert[]>([])
+  const [alertModalVisible, setAlertModalVisible] = useState(false)
+  const hasShownAlert = useRef(false)
 
   const timeRangeOptions = [
     { value: '7d', label: '近 7 天' },
@@ -70,6 +80,20 @@ const EfficiencyDashboard: React.FC = () => {
     { value: '6m', label: '近 6 个月' },
     { value: '1y', label: '近 1 年' },
   ]
+
+  const fetchAlerts = useCallback(async () => {
+    try {
+      const result = await alertsApi.getAlerts({ resolved: false, limit: 20 })
+      setAlerts(result.alerts || [])
+      
+      if (result.alerts && result.alerts.length > 0 && !hasShownAlert.current) {
+        setAlertModalVisible(true)
+        hasShownAlert.current = true
+      }
+    } catch (error) {
+      console.error('获取预警数据失败', error)
+    }
+  }, [])
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -88,7 +112,29 @@ const EfficiencyDashboard: React.FC = () => {
 
   useEffect(() => {
     fetchData()
-  }, [fetchData])
+    fetchAlerts()
+    
+    const timer = setInterval(() => {
+      fetchAlerts()
+    }, 60000)
+    
+    return () => clearInterval(timer)
+  }, [fetchData, fetchAlerts])
+
+  const handleResolveAlert = async (alertId: number) => {
+    try {
+      await alertsApi.resolveAlert(alertId)
+      message.success('已标记为处理')
+      setAlerts((prev) =>
+        prev.map((a) =>
+          a.id === alertId ? { ...a, resolved: true } : a
+        )
+      )
+      fetchData()
+    } catch (error) {
+      message.error('操作失败')
+    }
+  }
 
   const maxScore = useMemo(() => {
     if (!data?.rankings?.length) return 0
@@ -233,6 +279,26 @@ const EfficiencyDashboard: React.FC = () => {
       ),
     },
     {
+      title: (
+        <Tooltip title="因高危预警被扣的分数">
+          <Space>
+            <FallOutlined />
+            预警扣分
+          </Space>
+        </Tooltip>
+      ),
+      dataIndex: 'alert_penalty',
+      key: 'alert_penalty',
+      width: 100,
+      align: 'right',
+      sorter: (a, b) => a.alert_penalty - b.alert_penalty,
+      render: (val: number) => (
+        <Tag color={val > 0 ? 'red' : 'green'}>
+          {val > 0 ? `-${val}` : 0}
+        </Tag>
+      ),
+    },
+    {
       title: '总分',
       dataIndex: 'total_score',
       key: 'total_score',
@@ -288,6 +354,15 @@ const EfficiencyDashboard: React.FC = () => {
             style={{ width: 140 }}
             options={timeRangeOptions}
           />
+          <Badge count={alerts.filter((a) => !a.resolved).length} offset={[-2, 2]}>
+            <Button
+              icon={<BellOutlined />}
+              onClick={() => setAlertModalVisible(true)}
+              danger={alerts.filter((a) => !a.resolved).length > 0}
+            >
+              预警中心
+            </Button>
+          </Badge>
           <Button icon={<ReloadOutlined />} onClick={fetchData} loading={loading}>
             刷新
           </Button>
@@ -446,6 +521,13 @@ const EfficiencyDashboard: React.FC = () => {
           fetchData()
         }}
         currentWeights={data?.weights || null}
+      />
+
+      <HighRiskAlertModal
+        visible={alertModalVisible}
+        alerts={alerts}
+        onClose={() => setAlertModalVisible(false)}
+        onResolve={handleResolveAlert}
       />
     </div>
   )

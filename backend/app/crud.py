@@ -233,7 +233,9 @@ def calculate_user_efficiency(db: Session, user_id: int, weights: models.WeightC
     smell_penalty = code_smells * weights.code_smell_penalty
     vuln_penalty = vulnerabilities * weights.vulnerability_penalty
     
-    total_score = code_score + bug_fix_score + story_score - bug_penalty - smell_penalty - vuln_penalty
+    alert_penalty = get_user_penalty_points(db, user_id, start_date, end_date)
+    
+    total_score = code_score + bug_fix_score + story_score - bug_penalty - smell_penalty - vuln_penalty - alert_penalty
     
     bug_rate = (sonar_bugs / total_lines * 1000) if total_lines > 0 else 0.0
     
@@ -249,6 +251,7 @@ def calculate_user_efficiency(db: Session, user_id: int, weights: models.WeightC
         "sonar_bugs": sonar_bugs,
         "code_smells": code_smells,
         "vulnerabilities": vulnerabilities,
+        "alert_penalty": alert_penalty,
         "total_score": round(total_score, 2),
         "bug_rate": round(bug_rate, 2)
     }
@@ -270,3 +273,197 @@ def get_efficiency_rankings(db: Session, start_date: datetime = None, end_date: 
         item["rank"] = i + 1
     
     return rankings
+
+
+def record_jira_status_change(
+    db: Session,
+    issue_key: str,
+    old_status: str,
+    new_status: str,
+    assignee_id: int = None,
+    change_type: str = "status_change"
+) -> models.JiraStatusChange:
+    change = models.JiraStatusChange(
+        issue_key=issue_key,
+        old_status=old_status,
+        new_status=new_status,
+        changed_at=datetime.utcnow(),
+        assignee_id=assignee_id,
+        change_type=change_type
+    )
+    db.add(change)
+    db.commit()
+    db.refresh(change)
+    return change
+
+
+def detect_idle_fish_behavior(db: Session, user_id: int, idle_days: int = 3) -> Optional[dict]:
+    """
+    检测摸鱼行为：连续 idle_days 天无 commit，但 Jira 状态反复切换
+    返回检测结果或 None
+    """
+    now = datetime.utcnow()
+    start_date = now - timedelta(days=idle_days)
+    
+    commit_count = db.query(func.count(models.CodeCommit.id)).filter(
+        models.CodeCommit.author_id == user_id,
+        models.CodeCommit.committed_at >= start_date,
+        models.CodeCommit.committed_at <= now
+    ).scalar()
+    
+    if commit_count > 0:
+        return None
+    
+    weights = get_default_weight_config(db)
+    flip_threshold = weights.status_flip_threshold
+    
+    status_changes = db.query(models.JiraStatusChange).filter(
+        models.JiraStatusChange.assignee_id == user_id,
+        models.JiraStatusChange.changed_at >= start_date,
+        models.JiraStatusChange.changed_at <= now
+    ).all()
+    
+    issue_flip_count = {}
+    for change in status_changes:
+        key = change.issue_key
+        if key not in issue_flip_count:
+            issue_flip_count[key] = 0
+        issue_flip_count[key] += 1
+    
+    high_flip_issues = [
+        key for key, count in issue_flip_count.items()
+        if count >= flip_threshold
+    ]
+    
+    if not high_flip_issues:
+        return None
+    
+    total_flips = len(status_changes)
+    
+    return {
+        "user_id": user_id,
+        "idle_days": idle_days,
+        "total_status_flips": total_flips,
+        "high_risk_issues": high_flip_issues,
+        "penalty_points": weights.idle_days_penalty,
+        "alert_title": f"连续{idle_days}天无代码提交，但Jira工单状态频繁切换",
+        "alert_description": f"检测到该人员在连续{idle_days}天内没有任何GitLab代码提交记录，"
+                             f"但在Jira上对{len(high_flip_issues)}个工单进行了{total_flips}次状态切换，"
+                             f"疑似无效流转行为。"
+    }
+
+
+def create_high_risk_alert(
+    db: Session,
+    user_id: int,
+    alert_type: str,
+    title: str,
+    description: str = None,
+    issue_keys: List[str] = None,
+    penalty_points: float = 0.0,
+    severity: str = "high"
+) -> models.HighRiskAlert:
+    existing = db.query(models.HighRiskAlert).filter(
+        models.HighRiskAlert.user_id == user_id,
+        models.HighRiskAlert.alert_type == alert_type,
+        models.HighRiskAlert.resolved == False,
+        models.HighRiskAlert.detected_at >= datetime.utcnow() - timedelta(hours=1)
+    ).first()
+    
+    if existing:
+        return existing
+    
+    alert = models.HighRiskAlert(
+        user_id=user_id,
+        alert_type=alert_type,
+        severity=severity,
+        title=title,
+        description=description or "",
+        issue_keys=",".join(issue_keys) if issue_keys else "",
+        penalty_points=penalty_points,
+        detected_at=datetime.utcnow(),
+        resolved=False
+    )
+    db.add(alert)
+    db.commit()
+    db.refresh(alert)
+    return alert
+
+
+def scan_and_create_idle_alerts(db: Session) -> List[models.HighRiskAlert]:
+    """
+    扫描所有用户，检测摸鱼行为并生成预警
+    """
+    users = db.query(models.User).all()
+    new_alerts = []
+    
+    for user in users:
+        result = detect_idle_fish_behavior(db, user.id, idle_days=3)
+        if result:
+            alert = create_high_risk_alert(
+                db=db,
+                user_id=user.id,
+                alert_type="idle_fish",
+                title=result["alert_title"],
+                description=result["alert_description"],
+                issue_keys=result["high_risk_issues"],
+                penalty_points=result["penalty_points"],
+                severity="high"
+            )
+            if alert.detected_at >= datetime.utcnow() - timedelta(seconds=10):
+                new_alerts.append(alert)
+    
+    return new_alerts
+
+
+def get_high_risk_alerts(
+    db: Session,
+    resolved: bool = False,
+    limit: int = 50,
+    offset: int = 0
+) -> tuple:
+    query = db.query(models.HighRiskAlert)
+    
+    if resolved is not None:
+        query = query.filter(models.HighRiskAlert.resolved == resolved)
+    
+    total = query.count()
+    alerts = (
+        query.order_by(models.HighRiskAlert.detected_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    
+    unresolved_count = db.query(models.HighRiskAlert).filter(
+        models.HighRiskAlert.resolved == False
+    ).count()
+    
+    return alerts, total, unresolved_count
+
+
+def resolve_alert(db: Session, alert_id: int) -> Optional[models.HighRiskAlert]:
+    alert = db.query(models.HighRiskAlert).filter(models.HighRiskAlert.id == alert_id).first()
+    if not alert:
+        return None
+    alert.resolved = True
+    alert.resolved_at = datetime.utcnow()
+    db.commit()
+    db.refresh(alert)
+    return alert
+
+
+def get_user_penalty_points(db: Session, user_id: int, start_date: datetime = None, end_date: datetime = None) -> float:
+    """
+    计算用户在指定时间范围内的预警扣分之和
+    """
+    query = db.query(func.coalesce(func.sum(models.HighRiskAlert.penalty_points), 0)).filter(
+        models.HighRiskAlert.user_id == user_id
+    )
+    
+    if start_date:
+        query = query.filter(models.HighRiskAlert.detected_at >= start_date)
+    if end_date:
+        query = query.filter(models.HighRiskAlert.detected_at <= end_date)
+    
+    return float(query.scalar())

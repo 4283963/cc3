@@ -147,12 +147,68 @@ def seed_mock_data():
         
         crud.get_default_weight_config(db)
         
+        idle_fish_users = random.sample(users, 2)
+        statuses = ["To Do", "In Progress", "In Review", "Blocked", "To Do", "In Progress"]
+        
+        for user in idle_fish_users:
+            num_changes = random.randint(8, 15)
+            issue_key = f"DEV-{2000 + user.id}"
+            
+            for i in range(num_changes):
+                old_idx = i % len(statuses)
+                new_idx = (i + 1) % len(statuses)
+                
+                change_time = datetime.utcnow() - timedelta(
+                    days=random.uniform(0, 2),
+                    hours=random.randint(0, 23),
+                    minutes=random.randint(0, 59)
+                )
+                
+                change = models.JiraStatusChange(
+                    issue_key=issue_key,
+                    old_status=statuses[old_idx],
+                    new_status=statuses[new_idx],
+                    changed_at=change_time,
+                    assignee_id=user.id,
+                    change_type="status_change"
+                )
+                db.add(change)
+            
+            alert = models.HighRiskAlert(
+                user_id=user.id,
+                alert_type="idle_fish",
+                severity="high",
+                title=f"连续3天无代码提交，但Jira工单状态频繁切换",
+                description=f"检测到该人员在连续3天内没有任何GitLab代码提交记录，"
+                           f"但在Jira上对1个工单进行了{num_changes}次状态切换，疑似无效流转行为。",
+                issue_keys=issue_key,
+                penalty_points=10.0,
+                detected_at=datetime.utcnow() - timedelta(hours=random.randint(1, 12)),
+                resolved=False
+            )
+            db.add(alert)
+        
+        quality_decline_user = random.choice([u for u in users if u not in idle_fish_users])
+        quality_alert = models.HighRiskAlert(
+            user_id=quality_decline_user.id,
+            alert_type="quality_degradation",
+            severity="medium",
+            title="代码质量劣化预警",
+            description="近7天新增Sonar Bug数量较上周上升50%，代码质量有下降趋势，请关注。",
+            issue_keys="",
+            penalty_points=5.0,
+            detected_at=datetime.utcnow() - timedelta(hours=random.randint(1, 24)),
+            resolved=False
+        )
+        db.add(quality_alert)
+        
         db.commit()
         print(f"Mock 数据生成完成!")
         print(f"- 用户: {len(users)} 人")
         print(f"- 代码提交: ~{len(users) * 40 * 0.7 * 3} 条")
         print(f"- Jira 任务: {story_count + bug_count} 个 (故事: {story_count}, Bug: {bug_count})")
         print(f"- Sonar 问题: ~{len(users) * 8} 个")
+        print(f"- 高危预警: {len(idle_fish_users) + 1} 条 (摸鱼高危 {len(idle_fish_users)} 条)")
         
     except Exception as e:
         db.rollback()
